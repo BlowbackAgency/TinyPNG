@@ -38,15 +38,15 @@ echo "<img src='{$image->url}' alt='{$image->description}' />";
 
 Name       | Type   | Default | Description
 ---------- | ------ | ------- | -----------
-`apikey`   | string | ``      | TinyPNG developer API key (required).
+`apikey`   | string |         | TinyPNG developer API key (required).
 `logging`  | int    | `1`     | Log compression data (1=true, 0=false).
 `limit`    | int    | `500`   | Monthly compression usage limit (zero or empty for no limit).
 `auto`     | int    | `0`     | Auto mode (1=true, 0=false). Compress automatically `$image->size()` resized variations.
-`sizes`    | string | ``      | Ignored sizes at auto mode. Separate width/height by colon and sizes by pipe (200,200|960,0|0,320).
+`sizes`    | string |         | Ignored sizes at auto mode. Separate width/height by colon and sizes by pipe (200,200|960,0|0,320).
 
 ## Contribute
 
-Please report any bugs or enhancements as [opening new issue](./issues). If you find this module useful, you can always support our work by making a small [donation](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=WB4BHJ8HS8U8Q). Thanks!
+Please report any bugs or enhancements as [opening new issue](../../issues). If you find this module useful, you can always support our work by making a small [donation](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=WB4BHJ8HS8U8Q). Thanks!
 
 ## License
 
