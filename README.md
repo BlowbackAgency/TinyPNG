@@ -46,7 +46,7 @@ Name       | Type   | Default | Description
 
 ## Contribute
 
-Please report any bugs or enhancements as [opening new issue](.issues). If you find this module useful, you can always support our work by making a small [donation](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=WB4BHJ8HS8U8Q). Thanks!
+Please report any bugs or enhancements as [opening new issue](./issues). If you find this module useful, you can always support our work by making a small [donation](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=WB4BHJ8HS8U8Q). Thanks!
 
 ## License
 
