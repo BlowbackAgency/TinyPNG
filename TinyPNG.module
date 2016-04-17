@@ -1,0 +1,399 @@
+<?php 
+/**
+ * TinyPNG module
+ *
+ * Tinify PHP client for ProcessWire
+ *
+ * @version 1.0.0
+ * @author Jukka Hankaniemi https://github.com/Roope
+ * @copyright Blowback https://github.com/BlowbackDesign
+ * @license MIT http://opensource.org/licenses/MIT
+ *
+ */
+class TinyPNG extends WireData implements Module, ConfigurableModule {
+
+	const VARIATION = 'tiny';
+	const LOG_NAME = 'tiny-png';
+	const LIB_PATH = 'tinify-php/lib/';
+
+	const UNKNOWN = 0;
+	const SUCCESS = 1;
+	const FAILURE = 2;
+
+	private $status, $ignoredSizes;
+
+	/**
+	 * ProcessWire module info
+	 *
+	 */
+	public static function getModuleInfo() {
+		return array(
+			'title' => 'TinyPNG Image Compression', 
+			'summary' => 'Tinify PHP client for ProcessWire.', 
+			'version' => 100, 
+			'href' => 'https://github.com/BlowbackDesign/TinyPNG', 
+			'singular' => true, 
+			'autoload' => true, 
+		);
+	}
+	/**
+	 * Tinify PHP library files
+	 *
+	 */
+	private static function libFiles() {
+		return array(
+			'Tinify/Exception.php', 
+			'Tinify/ResultMeta.php', 
+			'Tinify/Result.php', 
+			'Tinify/Source.php', 
+			'Tinify/Client.php', 
+			'Tinify.php', 
+		);
+	}
+	/**
+	 * Tinify PHP allowed image types
+	 *
+	 */
+	public static function imageTypes() {
+		return array('image/png', 'image/jpeg');
+	}
+	/**
+	 * Module construct: include library and set defaults
+	 *
+	 */
+	public function __construct() {
+		$path = dirname(__FILE__) . '/' . self::LIB_PATH;
+		foreach(self::libFiles() as $file) require_once($path . $file);
+		$this->ignoredSizes = array();
+		$this->status = self::UNKNOWN;
+		$this->set('auto', 0);
+		$this->set('limit', 500);
+		$this->set('logging', 1);
+		$this->set('sizes', '');
+		$this->set('apikey', '');
+	}
+	/**
+	 * Module init
+	 *
+	 */
+	public function init() {
+
+	}
+	/**
+	 * Module ready: set up Tinify and hooks
+	 *
+	 */
+	public function ready() {
+		$this->setKeyAndValidate();
+		$this->setConfigIgnoredSizes();
+		$this->addHook('Pageimage::tinify', $this, 'tinifyPageimage');
+		$this->addHookAfter('Pageimage::size', $this, 'tinifyPageimageSize');
+	}
+	/**
+	 * Module uninstall: delete log file
+	 *
+	 */
+	public function ___uninstall() {
+		wire('log')->delete(self::LOG_NAME);
+	}
+	/**
+	 * Pageimage::tinify hook
+	 *
+	 * @param HookEvent $event Hook for ProcessWire Pageimage object
+	 *
+	 */
+	public function tinifyPageimage(HookEvent $event) {
+		$image = $event->object;
+		if($this->imageAllowed($image->filename)) {
+			$event->return = $this->tinyPageimage($image);
+		}
+	}
+	/**
+	 * Pageimage::size hook
+	 *
+	 * @param HookEvent $event Hook for ProcessWire Pageimage object
+	 *
+	 */
+	public function tinifyPageimageSize(HookEvent $event) {
+		$image = $event->return;
+		if($this->auto && $this->imageAllowed($image->filename)) {
+			list($width, $height) = $event->arguments;
+			if($this->sizeAllowed((int) $width, (int) $height)) {
+				$event->return = $this->tinyPageimage($image);
+			}
+		}
+	}
+	/**
+	 * Return tiny variation of pageimage (if available) for given $image
+	 *
+	 * @param Pageimage $image Source for tiny variation
+	 * @throws WireException When fails to copy source as tiny variation
+	 * @return Pageimage
+	 *
+	 */
+	private function tinyPageimage(Pageimage $image) {
+		$prefix = $image->getOriginal() ? "-" : ".-";
+		$basename = basename($image->basename(), "." . $image->ext());
+		$basename = "{$basename}{$prefix}" . self::VARIATION . "." . $image->ext();
+		$filename = str_replace($image->basename(), $basename, $image->filename());
+		$tinyimage = null;
+		if(is_file($filename) && filemtime($filename) >= filemtime($image->filename())) {
+			$tinyimage = clone $image;
+		}
+		if(!$tinyimage && $this->compressionAllowed()) {
+			if(copy($image->filename(), $filename)) {
+				if($this->compressImage($filename) !== true) unlink($filename);
+				else $tinyimage = clone $image;
+			} else {
+				throw new WireException("Failed to copy Tiny image variation: $filename");
+			}
+		}
+		if($tinyimage instanceof Pageimage) {
+			$original = $image->original ? : $image;
+			$tinyimage->setFilename($filename);
+			$tinyimage->setOriginal($original);
+			return $tinyimage;
+		}
+		return $image;
+	}
+	/**
+	 * Is image size allowed at given $width and $height
+	 *
+	 * @param int $width Resized image width
+	 * @param int $height Resized image height
+	 * @return bool
+	 *
+	 */
+	private function sizeAllowed($width, $height) {
+		foreach($this->ignoredSizes as $size) {
+			if($size['width'] === $width && $size['height'] === $height) {
+				return false;
+			}
+		}
+		return true;
+	}
+	/**
+	 * Is image at given $filename allowed
+	 *
+	 * @param string $filename Path to image
+	 * @return bool
+	 *
+	 */
+	private function imageAllowed($filename) {
+		$type = image_type_to_mime_type(exif_imagetype($filename));
+		if(!in_array($type, self::imageTypes())) return false;
+		return true;
+	}
+	/**
+	 * Is Tinify compression allowed
+	 *
+	 * @return bool
+	 *
+	 */
+	private function compressionAllowed() {
+		if($this->status !== self::SUCCESS) return false;
+		if(!empty($this->limit) && $this->compressionCount() >= $this->limit) return false;
+		return true;
+	}
+	/**
+	 * Compress image at given $filename
+	 *
+	 * @param string $filename Image filename with path
+	 * @return bool
+	 *
+	 */
+	private function compressImage($filename) {
+		if($this->logging) {
+			$sizeBefore = filesize($filename);
+		}
+		try {
+			$source = \Tinify\fromFile($filename);
+			$source->toFile($filename);
+			if($this->logging) {
+				clearstatcache();
+				$sizeAfter = filesize($filename);
+				$reducedSize = $sizeBefore - $sizeAfter;
+				$reducedSizeKb = round($reducedSize / 1024, 1);
+				$sizeBeforeKb = round($sizeBefore / 1024, 1);
+				$sizeAfterKb = round($sizeAfter / 1024, 1);
+				$saved = round(($reducedSize / $sizeBefore) * 100);
+				$file = str_replace(wire('config')->paths->files, '/', $filename);
+				$str = "$sizeBeforeKb KB --> $sizeAfterKb KB | Panda just saved you {$saved}% ({$reducedSizeKb} KB) $file";
+				wire('log')->save(self::LOG_NAME, $str);
+			}
+			return true;
+		} catch(\Tinify\Exception $e) {
+			$this->error($e->getMessage());
+			if($this->logging) {
+				wire('log')->save(self::LOG_NAME, $e->getMessage());
+			}
+		}
+		return false;
+	}
+	/**
+	 * Return API account compression count for this month
+	 *
+	 * @return int|null
+	 *
+	 */
+	private function compressionCount() {
+		return Tinify\getCompressionCount();
+	}
+	/**
+	 * Set TinyPNG API key and validate client
+	 *
+	 */
+	private function setKeyAndValidate() {
+		$key = wire('input')->post->apikey ? : $this->apikey;
+		if(strlen($key) > 0) {
+			try {
+				\Tinify\setKey($key);
+				\Tinify\validate();
+				$this->status = self::SUCCESS;
+			} catch(\Tinify\Exception $e) {
+				$this->status = self::FAILURE;
+				$this->error($e->getMessage());
+			}
+		} else {
+			$this->status = self::UNKNOWN;
+		}
+	}
+	/**
+	 * Set module config sizes to ignoredSizes array
+	 *
+	 */
+	private function setConfigIgnoredSizes() {
+		// ignore config options admin thumb size by default
+		$width = wire('config')->adminThumbOptions['width'];
+		$height = wire('config')->adminThumbOptions['height'];
+		$this->setIgnoredSize($width, $height);
+		// set user selectable ignored sizes from module config
+		foreach(explode('|', wire('sanitizer')->text($this->sizes)) as $size) {
+			$sizes = explode(',', $size);
+			if(count($sizes) > 1) {
+				list($width, $height) = $sizes;
+				$this->setIgnoredSize($width, $height);
+			}
+		}
+	}
+	/**
+	 * Set given $width and $height to ignoredSizes array
+	 *
+	 * @param int $width Ignored image width
+	 * @param int $height Ignored image height
+	 *
+	 */
+	private function setIgnoredSize($width, $height) {
+		$sizes = array('width' => (int) $width, 'height' => (int) $height);
+		$this->ignoredSizes[] = $sizes;
+	}
+	/**
+	 * Get ProcessWire module config form and inputfields
+	 *
+	 * @return InputfieldWrapper
+	 *
+	 */
+	public function getConfig() {
+		$inputfields = new InputfieldWrapper();
+		$inputfields->add($this->configApiKey());
+		$inputfields->add($this->configAuto());
+		$inputfields->add($this->configLogging());
+		$inputfields->add($this->configLimit());
+		$inputfields->add($this->configSizes());
+		return $inputfields;
+	}
+	/**
+	 * Static ProcessWire ConfigurableModule interface config
+	 *
+	 * @param array $data
+	 * @return InputfieldWrapper
+	 *
+	 */
+	public static function getModuleConfigInputfields(array $data) {
+		$module = wire('modules')->get(__CLASS__);
+		return $module->getConfig();
+	}
+	/**
+	 * API key config inputfield
+	 *
+	 * @return InputfieldText
+	 *
+	 */
+	protected function configApiKey() {
+		$field = wire('modules')->get('InputfieldText');
+		$field->attr('name+id', 'apikey');
+		$field->label = 'API key';
+		$field->description = 'Paste in your TinyPNG API key.';
+		$field->required = true;
+		if($this->status === self::SUCCESS) {
+			$field->attr('value', $this->apikey);
+			$field->notes = 'Panda says valid! Your usage this month is **' . $this->compressionCount() . '** compressed images.';
+		} else {
+			$field->notes = 'Please register and get your API key at [TinyPNG Developer page](https://tinypng.com/developers).';
+		}
+		return $field;
+	}
+	/**
+	 * Auto mode on/off config inputfield
+	 *
+	 * @return InputfieldCheckbox
+	 *
+	 */
+	protected function configAuto() {
+		$field = wire('modules')->get('InputfieldCheckbox');
+		$field->attr('name+id', 'auto');
+		if($this->auto) $field->attr('checked', 'checked');
+		$field->label = 'Enable auto mode';
+		$field->description = 'Compress `$image->size()` variations automatically.';
+		$field->columnWidth = 34;
+		return $field;
+	}
+	/**
+	 * Logging on/off config inputfield
+	 *
+	 * @return InputfieldCheckbox
+	 *
+	 */
+	protected function configLogging() {
+		$field = wire('modules')->get('InputfieldCheckbox');
+		$field->attr('name+id', 'logging');
+		if($this->logging) $field->attr('checked', 'checked');
+		$field->label = 'Enable logging';
+		$field->description = "Write compression data to ProcessWire log file.";
+		$field->columnWidth = 34;
+		return $field;
+	}
+	/**
+	 * Monthly compression limit config inputfield
+	 *
+	 * @return InputfieldInteger
+	 *
+	 */
+	protected function configLimit() {
+		$field = wire('modules')->get('InputfieldInteger');
+		$field->attr('name+id', 'limit');
+		$field->attr('value', $this->limit);
+		$field->attr('min', 0);
+		$field->label = 'Monthly limit';
+		$field->description = 'Set monthly usage limit (zero or empty for no limit).';
+		$field->columnWidth = 32;
+		return $field;
+	}
+	/**
+	 * Auto mode ignored sizes config inputfield
+	 *
+	 * @return InputfieldText
+	 *
+	 */
+	protected function configSizes() {
+		$field = wire('modules')->get('InputfieldText');
+		$field->attr('name+id', 'sizes');
+		$field->attr('value', $this->sizes);
+		$field->label = 'Auto mode ignored thumbnail sizes';
+		$field->description = 'Ignored image thumbnail sizes for auto mode compression. Size at `$config->adminThumbOptions` is ignored automatically.';
+		$field->notes = 'Separate width and height by colon and use pipe as delimiter for different sizes: 200,200|960,0|0,320';
+		$field->showIf = 'auto=1';
+		$field->collapsed = Inputfield::collapsedBlank;
+		return $field;
+	}
+}

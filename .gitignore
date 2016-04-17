@@ -1,0 +1,8 @@
+# ignore dot files
+\.*
+
+# except git files below
+!.gitkeep
+!.gitignore
+!.gitmodules
+!.gitattributes

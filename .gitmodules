@@ -1,0 +1,3 @@
+[submodule "tinify-php"]
+	path = tinify-php
+	url = https://github.com/tinify/tinify-php
