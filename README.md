@@ -42,7 +42,7 @@ Name       | Type   | Default | Description
 `logging`  | int    | `1`     | Log compression data (1=true, 0=false).
 `limit`    | int    | `500`   | Monthly compression usage limit (zero or empty for no limit).
 `auto`     | int    | `0`     | Auto mode (1=true, 0=false). Compress automatically `$image->size()` resized variations.
-`sizes`    | string |         | Ignored sizes at auto mode. Separate width/height by colon and sizes by pipe (200,200|960,0|0,320).
+`sizes`    | string |         | Ignored sizes at auto mode. Separate width/height by colon and sizes by pipe (200,200&#124;960,0&#124;0,320).
 
 ## Contribute
 
