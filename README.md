@@ -34,15 +34,25 @@ echo "<img src='{$image->url}' alt='{$image->description}' />";
 <img src='/site/assets/files/1/my_image.200x200-tiny.jpg' alt='My description' />
 ```
 
-## Module config options
+## Options
 
-Name       | Type   | Default | Description
----------- | ------ | ------- | -----------
-`apikey`   | string |         | TinyPNG developer API key (required).
-`logging`  | int    | `1`     | Log compression data (1=true, 0=false).
-`limit`    | int    | `500`   | Monthly compression usage limit (zero or empty for no limit).
-`auto`     | int    | `0`     | Auto mode (1=true, 0=false). Compress automatically `$image->size()` resized variations.
-`sizes`    | string |         | Ignored sizes at auto mode. Separate width/height by colon and sizes by pipe (200,200&#124;960,0&#124;0,320).
+### Module config options
+
+Name      | Type   | Default | Description
+--------- | ------ | ------- | -----------
+`apikey`  | string |         | TinyPNG developer API key (required).
+`logging` | int    | `1`     | Log compression data (1=true, 0=false).
+`limit`   | int    | `500`   | Monthly compression usage limit (zero or empty for no limit).
+`auto`    | int    | `0`     | Auto mode (1=true, 0=false). Compress automatically `$image->size()` resized variations.
+`sizes`   | string |         | Ignored sizes at auto mode. Separate width/height by colon and sizes by pipe (200,200&#124;960,0&#124;0,320).
+
+### `$config->imageSizerOptions`
+
+Name          | Type | Default | Description
+------------- | ---- | ------- | -----------
+`tinify`      | bool | `null`  | Enable/Disable compression (overrides auto option at module config).
+`tinify-png`  | bool | `true`  | Enable/Disable compression for PNG images.
+`tinify-jpeg` | bool | `true`  | Enable/Disable compression for JPEG images.
 
 ## Contribute
 

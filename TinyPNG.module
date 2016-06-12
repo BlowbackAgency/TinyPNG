@@ -4,7 +4,7 @@
  *
  * Tinify PHP client for ProcessWire
  *
- * @version 1.0.0
+ * @version 1.1.0
  * @author Jukka Hankaniemi https://github.com/Roope
  * @copyright Blowback https://github.com/BlowbackDesign
  * @license MIT http://opensource.org/licenses/MIT
@@ -20,7 +20,7 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 	const SUCCESS = 1;
 	const FAILURE = 2;
 
-	private $status, $ignoredSizes;
+	private $status, $image, $ignoredSizes, $sizerOptions;
 
 	/**
 	 * ProcessWire module info
@@ -30,11 +30,29 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		return array(
 			'title' => 'TinyPNG Image Compression', 
 			'summary' => 'Tinify PHP client for ProcessWire.', 
-			'version' => 100, 
+			'version' => 110, 
 			'href' => 'https://github.com/BlowbackDesign/TinyPNG', 
 			'singular' => true, 
 			'autoload' => true, 
 		);
+	}
+	/**
+	 * Default Tinify options for PW ImageSizer
+	 *
+	 */
+	private static function imageSizerOptions() {
+		return array(
+			'tinify' => null, 
+			'tinify-png' => true, 
+			'tinify-jpeg' => true, 
+		);
+	}
+	/**
+	 * Tinify client allowed image types
+	 *
+	 */
+	private static function clientImageTypes() {
+		return array('png', 'jpeg');
 	}
 	/**
 	 * Tinify PHP library files
@@ -51,21 +69,16 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		);
 	}
 	/**
-	 * Tinify PHP allowed image types
-	 *
-	 */
-	public static function imageTypes() {
-		return array('image/png', 'image/jpeg');
-	}
-	/**
 	 * Module construct: include library and set defaults
 	 *
 	 */
 	public function __construct() {
 		$path = dirname(__FILE__) . '/' . self::LIB_PATH;
 		foreach(self::libFiles() as $file) require_once($path . $file);
+		$this->sizerOptions = array_merge(self::imageSizerOptions(), wire('config')->imageSizerOptions);
 		$this->ignoredSizes = array();
 		$this->status = self::UNKNOWN;
+		$this->image = null;
 		$this->set('auto', 0);
 		$this->set('limit', 500);
 		$this->set('logging', 1);
@@ -87,7 +100,11 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		$this->setKeyAndValidate();
 		$this->setConfigIgnoredSizes();
 		$this->addHook('Pageimage::tinify', $this, 'tinifyPageimage');
-		$this->addHookAfter('Pageimage::size', $this, 'tinifyPageimageSize');
+		$this->addHookBefore('Pageimage::crop', $this, 'beforePageimageCrop');
+		$this->addHookBefore('Pageimage::size', $this, 'beforePageimageSize');
+		$this->addHookAfter('Pageimage::size', $this, 'afterPageimageSize');
+		$this->addHookBefore('ImageSizer::resize', $this, 'beforeImageSizerResize');
+		$this->addHookAfter('ProcessPageEditImageSelect::executeResize', $this, 'imageSelectResize');
 	}
 	/**
 	 * Module uninstall: delete log file
@@ -97,58 +114,123 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		wire('log')->delete(self::LOG_NAME);
 	}
 	/**
-	 * Pageimage::tinify hook
+	 * Pageimage::tinify hook: manual and forced tiny variations
 	 *
-	 * @param HookEvent $event Hook for ProcessWire Pageimage object
+	 * @param HookEvent $event Hook for Pageimage object
 	 *
 	 */
 	public function tinifyPageimage(HookEvent $event) {
 		$image = $event->object;
-		if($this->imageAllowed($image->filename)) {
-			$event->return = $this->tinyPageimage($image);
-		}
-	}
-	/**
-	 * Pageimage::size hook
-	 *
-	 * @param HookEvent $event Hook for ProcessWire Pageimage object
-	 *
-	 */
-	public function tinifyPageimageSize(HookEvent $event) {
-		$image = $event->return;
-		if($this->auto && $this->imageAllowed($image->filename)) {
-			list($width, $height) = $event->arguments;
-			if($this->sizeAllowed((int) $width, (int) $height)) {
-				$event->return = $this->tinyPageimage($image);
+		if($this->imageTypeAllowed($image->filename, null)) {
+			$filename = $this->tinyFilename($image);
+			if($this->compressImage($image->filename, $filename)) {
+				$event->return = $this->tinyPageimage($image, $filename);
 			}
 		}
 	}
 	/**
-	 * Return tiny variation of pageimage (if available) for given $image
+	 * Pageimage::crop before hook: disable auto compression by default
+	 *
+	 * @param HookEvent $event Hook for ImageSizer object
+	 *
+	 */
+	public function beforePageimageCrop(HookEvent $event) {
+		list($x, $y, $width, $height, $options) = $event->arguments;
+		if(!isset($options['tinify'])) $options['tinify'] = false;
+		$event->arguments = array($x, $y, $width, $height, $options);
+	}
+	/**
+	 * Pageimage::size before hook: auto mode P1 - flag compressed image
+	 *
+	 * @param HookEvent $event Hook for ImageSizer object
+	 *
+	 */
+	public function beforePageimageSize(HookEvent $event) {
+		$this->image = null;
+		$image = $event->object;
+		list($width, $height, $options) = $event->arguments;
+		$options = array_merge($this->sizerOptions, $options);
+		if(!$this->imageTypeAllowed($image->filename, $options)) return;
+		if(!$this->imageSizeAllowed((int) $width, (int) $height)) return;
+		if($this->auto && $options['tinify'] === false) return;
+		if($this->auto || $options['tinify'] === true) {
+			$this->image = $image;
+		}
+	}
+	/**
+	 * ImageSizer::resize before hook: auto mode P2 - force 100% quality
+	 *
+	 * @param HookEvent $event Hook for ImageSizer object
+	 *
+	 */
+	public function beforeImageSizerResize(HookEvent $event) {
+		if($this->image instanceof Pageimage) {
+			$image = $event->object;
+			$image->setQuality(100);
+		}
+	}
+	/**
+	 * Pageimage::size after hook: auto mode P3 - compress the image and return tiny variation
+	 *
+	 * @param HookEvent $event Hook for ImageSizer object
+	 *
+	 */
+	public function afterPageimageSize(HookEvent $event) {
+		if($this->image === $event->object) {
+			$image = $event->return;
+			$filename = $this->tinyFilename($image);
+			if($this->compressImage($image->filename, $filename)) {
+				$event->return = $this->tinyPageimage($image, $filename);
+			}
+		}
+		$this->image = null;
+	}
+	/**
+	 * ProcessPageEditImageSelect::executeResize hook: auto mode for rich text embedded image
+	 *
+	 * @param HookEvent $event Hook for ProcessPageEditImageSelect object
+	 *
+	 */
+	public function imageSelectResize(HookEvent $event) {
+		if(preg_match("@src='([^']+)'@" , $event->return, $match)) {
+			$src = $match[1];
+			$filename = $this->tinyFilename($src);
+			if(is_file($filename)) {
+				$event->return = str_replace($src, $filename, $event->return);
+			}
+		}
+	}
+	/**
+	 * Return tiny variation of a filename
+	 *
+	 * @param mixed $image Pageimage object or filename string
+	 * @return string Filename for Tiny image variation
+	 *
+	 */
+	private function tinyFilename($image) {
+		if($image instanceof Pageimage) {
+			$filename = $image->filename();
+			$prefix = $image->getOriginal() ? "-" : ".-";
+		} else {
+			$filename = $image;
+			$prefix = "-";
+		}
+		$pieces = explode(".", $filename);
+		$extension = array_pop($pieces);
+		$variation = $prefix . self::VARIATION;
+		return implode(".", $pieces) . "{$variation}.{$extension}";
+	}
+	/**
+	 * Return tiny variation of pageimage for given $image at $filename if available
 	 *
 	 * @param Pageimage $image Source for tiny variation
-	 * @throws WireException When fails to copy source as tiny variation
+	 * @param string $filename Tiny variation filename
 	 * @return Pageimage
 	 *
 	 */
-	private function tinyPageimage(Pageimage $image) {
-		$prefix = $image->getOriginal() ? "-" : ".-";
-		$basename = basename($image->basename(), "." . $image->ext());
-		$basename = "{$basename}{$prefix}" . self::VARIATION . "." . $image->ext();
-		$filename = str_replace($image->basename(), $basename, $image->filename());
-		$tinyimage = null;
-		if(is_file($filename) && filemtime($filename) >= filemtime($image->filename())) {
+	private function tinyPageimage(Pageimage $image, $filename) {
+		if(is_file($filename)) {
 			$tinyimage = clone $image;
-		}
-		if(!$tinyimage && $this->compressionAllowed()) {
-			if(copy($image->filename(), $filename)) {
-				if($this->compressImage($filename) !== true) unlink($filename);
-				else $tinyimage = clone $image;
-			} else {
-				throw new WireException("Failed to copy Tiny image variation: $filename");
-			}
-		}
-		if($tinyimage instanceof Pageimage) {
 			$original = $image->original ? : $image;
 			$tinyimage->setFilename($filename);
 			$tinyimage->setOriginal($original);
@@ -164,7 +246,7 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 	 * @return bool
 	 *
 	 */
-	private function sizeAllowed($width, $height) {
+	private function imageSizeAllowed($width, $height) {
 		foreach($this->ignoredSizes as $size) {
 			if($size['width'] === $width && $size['height'] === $height) {
 				return false;
@@ -173,15 +255,18 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		return true;
 	}
 	/**
-	 * Is image at given $filename allowed
+	 * Is image type at given $filename allowed
 	 *
 	 * @param string $filename Path to image
+	 * @param array $options Image sizer options
 	 * @return bool
 	 *
 	 */
-	private function imageAllowed($filename) {
-		$type = image_type_to_mime_type(exif_imagetype($filename));
-		if(!in_array($type, self::imageTypes())) return false;
+	private function imageTypeAllowed($filename, $options = array()) {
+		$options = is_array($options) ? array_merge($this->sizerOptions, $options) : array();
+		$type = ltrim(image_type_to_mime_type(exif_imagetype($filename)), 'image/');
+		if(!in_array($type, self::clientImageTypes())) return false;
+		if(isset($options["tinify-$type"]) && $options["tinify-$type"] === false) return false;
 		return true;
 	}
 	/**
@@ -196,39 +281,44 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		return true;
 	}
 	/**
-	 * Compress image at given $filename
+	 * Copy and compress image at given $source to $destination
 	 *
-	 * @param string $filename Image filename with path
+	 * @param string $source Image filename
+	 * @param string $destination Image filename
+	 * @throws WireException When fails to copy source image
 	 * @return bool
 	 *
 	 */
-	private function compressImage($filename) {
-		if($this->logging) {
-			$sizeBefore = filesize($filename);
+	private function compressImage($source, $destination) {
+		if(is_file($destination) && filemtime($destination) >= filemtime($source)) return true;
+		if(!$this->compressionAllowed()) return false;
+		if(!@copy($source, $destination)) {
+			throw new WireException("Failed to copy Tiny image variation: $source => $destination");
 		}
 		try {
-			$source = \Tinify\fromFile($filename);
-			$source->toFile($filename);
+			$tiny = \Tinify\fromFile($source);
+			$tiny->toFile($destination);
 			if($this->logging) {
-				clearstatcache();
-				$sizeAfter = filesize($filename);
+				$sizeBefore = filesize($source);
+				$sizeAfter = filesize($destination);
 				$reducedSize = $sizeBefore - $sizeAfter;
 				$reducedSizeKb = round($reducedSize / 1024, 1);
 				$sizeBeforeKb = round($sizeBefore / 1024, 1);
 				$sizeAfterKb = round($sizeAfter / 1024, 1);
 				$saved = round(($reducedSize / $sizeBefore) * 100);
-				$file = str_replace(wire('config')->paths->files, '/', $filename);
-				$str = "$sizeBeforeKb KB --> $sizeAfterKb KB | Panda just saved you {$saved}% ({$reducedSizeKb} KB) $file";
+				list($file, $id) = array_reverse(explode('/', $source));
+				$str = "$sizeBeforeKb KB --> $sizeAfterKb KB | Panda just saved you {$saved}% ({$reducedSizeKb} KB) from file: $file at page #{$id}";
 				wire('log')->save(self::LOG_NAME, $str);
 			}
 			return true;
 		} catch(\Tinify\Exception $e) {
+			unlink($destination);
 			$this->error($e->getMessage());
 			if($this->logging) {
 				wire('log')->save(self::LOG_NAME, $e->getMessage());
 			}
+			return false;
 		}
-		return false;
 	}
 	/**
 	 * Return API account compression count for this month
@@ -296,9 +386,9 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 	public function getConfig() {
 		$inputfields = new InputfieldWrapper();
 		$inputfields->add($this->configApiKey());
-		$inputfields->add($this->configAuto());
 		$inputfields->add($this->configLogging());
 		$inputfields->add($this->configLimit());
+		$inputfields->add($this->configAuto());
 		$inputfields->add($this->configSizes());
 		return $inputfields;
 	}
@@ -334,21 +424,6 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		return $field;
 	}
 	/**
-	 * Auto mode on/off config inputfield
-	 *
-	 * @return InputfieldCheckbox
-	 *
-	 */
-	protected function configAuto() {
-		$field = wire('modules')->get('InputfieldCheckbox');
-		$field->attr('name+id', 'auto');
-		if($this->auto) $field->attr('checked', 'checked');
-		$field->label = 'Enable auto mode';
-		$field->description = 'Compress `$image->size()` variations automatically.';
-		$field->columnWidth = 34;
-		return $field;
-	}
-	/**
 	 * Logging on/off config inputfield
 	 *
 	 * @return InputfieldCheckbox
@@ -360,7 +435,7 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		if($this->logging) $field->attr('checked', 'checked');
 		$field->label = 'Enable logging';
 		$field->description = "Write compression data to ProcessWire log file.";
-		$field->columnWidth = 34;
+		$field->columnWidth = 50;
 		return $field;
 	}
 	/**
@@ -376,7 +451,22 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		$field->attr('min', 0);
 		$field->label = 'Monthly limit';
 		$field->description = 'Set monthly usage limit (zero or empty for no limit).';
-		$field->columnWidth = 32;
+		$field->columnWidth = 50;
+		return $field;
+	}
+	/**
+	 * Auto mode on/off config inputfield
+	 *
+	 * @return InputfieldCheckbox
+	 *
+	 */
+	protected function configAuto() {
+		$field = wire('modules')->get('InputfieldCheckbox');
+		$field->attr('name+id', 'auto');
+		if($this->auto) $field->attr('checked', 'checked');
+		$field->label = 'Enable auto mode';
+		$field->description = 'Compress `$image->size()` variations automatically.';
+		$field->notes = 'You can override this option at template level by setting bool value to `$config->imageSizerOptions[\'tinify\']` or image `$options[\'tinify\']`.';
 		return $field;
 	}
 	/**
@@ -392,7 +482,6 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		$field->label = 'Auto mode ignored thumbnail sizes';
 		$field->description = 'Ignored image thumbnail sizes for auto mode compression. Size at `$config->adminThumbOptions` is ignored automatically.';
 		$field->notes = 'Separate width and height by colon and use pipe as delimiter for different sizes: 200,200|960,0|0,320';
-		$field->showIf = 'auto=1';
 		$field->collapsed = Inputfield::collapsedBlank;
 		return $field;
 	}
