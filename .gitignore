@@ -4,5 +4,4 @@
 # except git files below
 !.gitkeep
 !.gitignore
-!.gitmodules
 !.gitattributes
