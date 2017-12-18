@@ -1,4 +1,4 @@
-<?php 
+<?php
 /**
  * TinyPNG module
  *
@@ -28,12 +28,12 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 	 */
 	public static function getModuleInfo() {
 		return array(
-			'title' => 'TinyPNG Image Compression', 
-			'summary' => 'Tinify PHP client for ProcessWire.', 
-			'version' => 110, 
-			'href' => 'https://github.com/BlowbackDesign/TinyPNG', 
-			'singular' => true, 
-			'autoload' => true, 
+			'title' => 'TinyPNG Image Compression',
+			'summary' => 'Tinify PHP client for ProcessWire.',
+			'version' => 110,
+			'href' => 'https://github.com/BlowbackDesign/TinyPNG',
+			'singular' => true,
+			'autoload' => true,
 		);
 	}
 	/**
@@ -42,9 +42,9 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 	 */
 	private static function imageSizerOptions() {
 		return array(
-			'tinify' => null, 
-			'tinify-png' => true, 
-			'tinify-jpeg' => true, 
+			'tinify' => null,
+			'tinify-png' => true,
+			'tinify-jpeg' => true,
 		);
 	}
 	/**
@@ -60,12 +60,12 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 	 */
 	private static function libFiles() {
 		return array(
-			'Tinify/Exception.php', 
-			'Tinify/ResultMeta.php', 
-			'Tinify/Result.php', 
-			'Tinify/Source.php', 
-			'Tinify/Client.php', 
-			'Tinify.php', 
+			'Tinify/Exception.php',
+			'Tinify/ResultMeta.php',
+			'Tinify/Result.php',
+			'Tinify/Source.php',
+			'Tinify/Client.php',
+			'Tinify.php',
 		);
 	}
 	/**
