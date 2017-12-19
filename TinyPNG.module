@@ -86,25 +86,27 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		$this->set('apikey', '');
 	}
 	/**
-	 * Module init
+	 * Module init: set ignored sizes from pw and module config
 	 *
 	 */
 	public function init() {
-
+		$this->setConfigIgnoredSizes();
 	}
 	/**
-	 * Module ready: set up Tinify and hooks
+	 * Module ready: set up hooks
 	 *
 	 */
 	public function ready() {
-		$this->setKeyAndValidate();
-		$this->setConfigIgnoredSizes();
 		$this->addHook('Pageimage::tinify', $this, 'tinifyPageimage');
 		$this->addHookBefore('Pageimage::crop', $this, 'beforePageimageCrop');
 		$this->addHookBefore('Pageimage::size', $this, 'beforePageimageSize');
 		$this->addHookAfter('Pageimage::size', $this, 'afterPageimageSize');
 		$this->addHookBefore('ImageSizer::resize', $this, 'beforeImageSizerResize');
 		$this->addHookAfter('ProcessPageEditImageSelect::executeResize', $this, 'imageSelectResize');
+		// validate key at module config page
+		if($this->page->name == 'module' && $this->input->get->name == $this->className) {
+			$this->setKeyAndValidate();
+		}
 	}
 	/**
 	 * Module uninstall: delete log file
@@ -291,6 +293,7 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 	 */
 	private function compressImage($source, $destination) {
 		if(is_file($destination) && filemtime($destination) >= filemtime($source)) return true;
+		$this->setKeyAndValidate();
 		if(!$this->compressionAllowed()) return false;
 		if(!@copy($source, $destination)) {
 			throw new WireException("Failed to copy Tiny image variation: $source => $destination");
