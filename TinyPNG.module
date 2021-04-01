@@ -126,9 +126,10 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		if($this->imageTypeAllowed($image->filename, null)) {
 			$filename = $this->tinyFilename($image);
 			if($this->compressImage($image->filename, $filename)) {
-				$event->return = $this->tinyPageimage($image, $filename);
+				$image = $this->tinyPageimage($image, $filename);
 			}
 		}
+		$event->return = $image;
 	}
 	/**
 	 * Pageimage::crop before hook: disable auto compression by default
