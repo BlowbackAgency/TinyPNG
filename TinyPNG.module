@@ -4,7 +4,7 @@
  *
  * Tinify PHP client for ProcessWire
  *
- * @version 1.1.0
+ * @version 1.2.0
  * @author Jukka Hankaniemi https://github.com/Roope
  * @copyright Blowback https://github.com/BlowbackDesign
  * @license MIT http://opensource.org/licenses/MIT
@@ -30,7 +30,7 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 		return array(
 			'title' => 'TinyPNG Image Compression',
 			'summary' => 'Tinify PHP client for ProcessWire.',
-			'version' => 110,
+			'version' => 120,
 			'href' => 'https://github.com/BlowbackDesign/TinyPNG',
 			'singular' => true,
 			'autoload' => true,
