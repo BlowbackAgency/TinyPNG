@@ -42,8 +42,21 @@ class Source {
         return new Result($response->headers, $response->body);
     }
 
+    public function convert($options) {
+        $commands = array_merge($this->commands, array("convert" => $options));
+        return new self($this->url, $commands);
+    }
+
+    public function transform($options) {
+        $commands = array_merge($this->commands, array("transform" => $options));
+        return new self($this->url, $commands);
+    }
+
     public function result() {
-        $response = Tinify::getClient()->request("get", $this->url, $this->commands);
+        $has_commands  = !empty($this->commands);
+        $method = $has_commands ? "post" : "get";
+        $body = $has_commands ? $this->commands : null;
+        $response = Tinify::getClient()->request($method, $this->url, $body);
         return new Result($response->headers, $response->body);
     }
 

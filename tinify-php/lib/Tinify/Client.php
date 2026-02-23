@@ -28,17 +28,22 @@ class Client {
 
         if ($curl["version_number"] < 0x071201) {
             $version = $curl["version"];
-            throw new ClientException("Your curl version ${version} is outdated; please upgrade to 7.18.1 or higher");
+            throw new ClientException("Your curl version {$version} is outdated; please upgrade to 7.18.1 or higher");
         }
 
+        # Set minimum TLS version to 1.2, CURL_SSLVERSION_TLSv1_2 is not available in curl < 7.34.0
+        # Additionally old PHP versions may not support this constant
+        $tlsVersion = ($curl["version_number"] < 0x072200)
+            ? 6
+            : (defined('CURL_SSLVERSION_TLSv1_2') ? CURL_SSLVERSION_TLSv1_2 : 6);
         $this->options = array(
-            CURLOPT_BINARYTRANSFER => true,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HEADER => true,
             CURLOPT_USERPWD => "api:" . $key,
             CURLOPT_CAINFO => self::caBundle(),
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_USERAGENT => join(" ", array_filter(array(self::userAgent(), $app_identifier))),
+            CURLOPT_SSLVERSION => $tlsVersion,
         );
 
         if ($proxy) {
@@ -107,20 +112,24 @@ class Client {
             if (is_string($response)) {
                 $status = curl_getinfo($request, CURLINFO_HTTP_CODE);
                 $headerSize = curl_getinfo($request, CURLINFO_HEADER_SIZE);
-                curl_close($request);
+                if (PHP_VERSION_ID < 80000) {
+                    curl_close($request);
+                } else {
+                    unset($request);
+                }
 
                 $headers = self::parseHeaders(substr($response, 0, $headerSize));
-                $body = substr($response, $headerSize);
+                $responseBody = substr($response, $headerSize);
 
                 if (isset($headers["compression-count"])) {
                     Tinify::setCompressionCount(intval($headers["compression-count"]));
                 }
 
                 if ($status >= 200 && $status <= 299) {
-                    return (object) array("body" => $body, "headers" => $headers);
+                    return (object) array("body" => $responseBody, "headers" => $headers);
                 }
 
-                $details = json_decode($body);
+                $details = json_decode($responseBody);
                 if (!$details) {
                     $message = sprintf("Error while parsing response: %s (#%d)",
                         PHP_VERSION_ID >= 50500 ? json_last_error_msg() : "Error",
@@ -135,7 +144,11 @@ class Client {
                 throw Exception::create($details->message, $details->error, $status);
             } else {
                 $message = sprintf("%s (#%d)", curl_error($request), curl_errno($request));
-                curl_close($request);
+                if (PHP_VERSION_ID < 80000) {
+                    curl_close($request);
+                } else {
+                    unset($request);
+                }
                 if ($retries > 0) continue;
                 throw new ConnectionException("Error while connecting: " . $message);
             }
