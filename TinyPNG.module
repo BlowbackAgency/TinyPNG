@@ -357,10 +357,13 @@ class TinyPNG extends WireData implements Module, ConfigurableModule {
 	 *
 	 */
 	private function setConfigIgnoredSizes() {
-		// ignore config options admin thumb size by default
+		// ignore config options admin thumb size
 		$width = wire('config')->adminThumbOptions['width'];
 		$height = wire('config')->adminThumbOptions['height'];
 		$this->setIgnoredSize($width, $height);
+		// ignore PW3 thumbnail size
+		$height = InputfieldImage::defaultGridSize * 2;
+		$this->setIgnoredSize(0, $height);
 		// set user selectable ignored sizes from module config
 		foreach(explode('|', wire('sanitizer')->text($this->sizes)) as $size) {
 			$sizes = explode(',', $size);
